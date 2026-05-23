@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Risk Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: #07070d; }
+    ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #111; } ::-webkit-scrollbar-thumb { background: #333; }
+    input { background: #0f0f1a; border: 1px solid #222; color: #e0e0e0; padding: 10px 14px; font-family: 'DM Mono', monospace; font-size: 14px; outline: none; border-radius: 4px; width: 100%; transition: border-color 0.2s; }
+    input:focus { border-color: #f0b429; }
+    input::placeholder { color: #333; }
+    button { cursor: pointer; font-family: 'DM Mono', monospace; border: none; transition: all 0.15s; }
+    .tab { background: transparent; color: #555; padding: 6px 14px; border-radius: 3px; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+    .tab.active { background: #1a1a28; color: #f0b429; }
+    .tab:hover { color: #aaa; }
+    @keyframes pulseGlow { 0% { box-shadow: 0 0 0 0 rgba(240,180,41,0.4); } 70% { box-shadow: 0 0 0 20px rgba(240,180,41,0); } 100% { box-shadow: 0 0 0 0 rgba(240,180,41,0); } }
+    .pulse { animation: pulseGlow 0.6s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .fadein { animation: fadeIn 0.3s ease-out; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // Veriler tarayıcıda saklanır (localStorage) — sayfayı kapatsan bile kaybolmaz.
+    const store = {
+      get: (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } },
+      set: (key, val) => { try { localStorage.setItem(key, val); } catch (_) {} },
+    };
+
+    function getRisk(pnl, rules) {
+      if (pnl <= rules.drawdownThreshold) return rules.drawdownRisk;
+      if (pnl >= rules.profitThreshold) return rules.profitRisk;
+      return rules.baseRisk;
+    }
+
+    function getRiskLabel(pnl, rules) {
+      if (pnl <= rules.drawdownThreshold) return { label: "DRAWDOWN MODE", color: "#ff3b3b" };
+      if (pnl >= rules.profitThreshold) return { label: "PROFIT MODE", color: "#00e5a0" };
+      return { label: "NORMAL MODE", color: "#f0b429" };
+    }
+
+    const initialRules = {
+      baseRisk: 300,
+      profitThreshold: 1000,
+      profitRisk: 350,
+      drawdownThreshold: -1100,
+      drawdownRisk: 200,
+    };
+
+    function App() {
+      const [accounts, setAccounts] = useState([]);
+      const [selectedId, setSelectedId] = useState(null);
+      const [loaded, setLoaded] = useState(false);
+      const [view, setView] = useState("dashboard");
+      const [newAccName, setNewAccName] = useState("");
+      const [newAccBalance, setNewAccBalance] = useState("");
+      const [pnlInput, setPnlInput] = useState("");
+      const [editRules, setEditRules] = useState(null);
+      const [pulse, setPulse] = useState(false);
+
+      useEffect(() => {
+        try {
+          const res = store.get("rm-accounts");
+          if (res) {
+            const parsed = JSON.parse(res);
+            setAccounts(parsed);
+            if (parsed.length > 0) setSelectedId(parsed[0].id);
+          }
+        } catch (_) {}
+        setLoaded(true);
+      }, []);
+
+      const saveAccounts = (accs) => { store.set("rm-accounts", JSON.stringify(accs)); };
+
+      const selectedAccount = accounts.find((a) => a.id === selectedId);
+
+      const addAccount = () => {
+        if (!newAccName.trim() || !newAccBalance) return;
+        const acc = {
+          id: Date.now().toString(),
+          name: newAccName.trim(),
+          balance: parseFloat(newAccBalance),
+          pnl: 0,
+          rules: { ...initialRules },
+        };
+        const updated = [...accounts, acc];
+        setAccounts(updated);
+        saveAccounts(updated);
+        setSelectedId(acc.id);
+        setNewAccName("");
+        setNewAccBalance("");
+        setView("dashboard");
+      };
+
+      const deleteAccount = (id) => {
+        const updated = accounts.filter((a) => a.id !== id);
+        setAccounts(updated);
+        saveAccounts(updated);
+        if (selectedId === id) setSelectedId(updated[0] ? updated[0].id : null);
+      };
+
+      const updatePnl = (val) => {
+        if (!selectedAccount) return;
+        const num = parseFloat(val);
+        if (isNaN(num)) return;
+        const updated = accounts.map((a) => a.id === selectedId ? { ...a, pnl: num } : a);
+        setAccounts(updated);
+        saveAccounts(updated);
+        setPulse(true);
+        setTimeout(() => setPulse(false), 600);
+      };
+
+      const saveRules = () => {
+        if (!editRules) return;
+        const numericRules = {
+          baseRisk: parseFloat(editRules.baseRisk) || 0,
+          profitThreshold: parseFloat(editRules.profitThreshold) || 0,
+          profitRisk: parseFloat(editRules.profitRisk) || 0,
+          drawdownThreshold: parseFloat(editRules.drawdownThreshold) || 0,
+          drawdownRisk: parseFloat(editRules.drawdownRisk) || 0,
+        };
+        const updated = accounts.map((a) => a.id === selectedId ? { ...a, rules: numericRules } : a);
+        setAccounts(updated);
+        saveAccounts(updated);
+        setView("dashboard");
+        setEditRules(null);
+      };
+
+      const resetPnl = () => {
+        const updated = accounts.map((a) => a.id === selectedId ? { ...a, pnl: 0 } : a);
+        setAccounts(updated);
+        saveAccounts(updated);
+        setPnlInput("");
+      };
+
+      if (!loaded) return <div style={{ background: "#0a0a0f", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#444", fontFamily: "monospace" }}>LOADING...</div>;
+
+      const acc = selectedAccount;
+      const risk = acc ? getRisk(acc.pnl, acc.rules) : 0;
+      const riskInfo = acc ? getRiskLabel(acc.pnl, acc.rules) : null;
+      const pnlColor = acc ? (acc.pnl > 0 ? "#00e5a0" : acc.pnl < 0 ? "#ff3b3b" : "#888") : "#888";
+
+      return (
+        <div style={{ minHeight: "100vh", background: "#07070d", fontFamily: "'DM Mono', 'Courier New', monospace", color: "#e0e0e0" }}>
+          {/* Header */}
+          <div style={{ borderBottom: "1px solid #1a1a1a", padding: "16px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "#07070d", zIndex: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f0b429", boxShadow: "0 0 8px #f0b429" }} />
+              <span style={{ fontFamily: "'Syne', sans-serif", fontSize: 16, fontWeight: 800, letterSpacing: 2, color: "#fff" }}>RISK MGR</span>
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button className={"tab " + (view === "dashboard" ? "active" : "")} onClick={() => setView("dashboard")}>Dashboard</button>
+              <button className={"tab " + (view === "addAccount" ? "active" : "")} onClick={() => setView("addAccount")}>+ Hesap</button>
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 20px" }}>
+
+            {view === "addAccount" && (
+              <div className="fadein">
+                <div style={{ fontSize: 11, color: "#555", letterSpacing: 2, marginBottom: 20 }}>YENİ HESAP EKLE</div>
+                <div style={{ background: "#0d0d18", border: "1px solid #1e1e2e", borderRadius: 8, padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#555", marginBottom: 6, letterSpacing: 1 }}>HESAP ADI</div>
+                    <input placeholder="Örn: Prop Firm A" value={newAccName} onChange={e => setNewAccName(e.target.value)} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#555", marginBottom: 6, letterSpacing: 1 }}>BAŞLANGIÇ BAKİYESİ ($)</div>
+                    <input type="text" inputMode="numeric" placeholder="2000" value={newAccBalance} onChange={e => { let v = e.target.value.replace(/[^0-9]/g, ""); v = v.replace(/^0+(\d)/, "$1"); setNewAccBalance(v); }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: "#444", padding: "10px 12px", background: "#111", borderRadius: 4 }}>
+                    Risk kuralları hesap oluşturduktan sonra düzenlenebilir. Varsayılan: Base 300 / Kâr&gt;1000→350 / DD&lt;-1100→200
+                  </div>
+                  <button onClick={addAccount} style={{ background: "#f0b429", color: "#07070d", padding: "12px 24px", fontWeight: 500, fontSize: 13, letterSpacing: 1, borderRadius: 4 }}>
+                    HESAP OLUŞTUR
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {view === "editRules" && acc && (
+              <div className="fadein">
+                <div style={{ fontSize: 11, color: "#555", letterSpacing: 2, marginBottom: 20 }}>RİSK KURALLARI — {acc.name.toUpperCase()}</div>
+                <div style={{ background: "#0d0d18", border: "1px solid #1e1e2e", borderRadius: 8, padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
+                  {[
+                    { key: "baseRisk", label: "NORMAL RİSK ($)", desc: "Varsayılan risk miktarı", neg: false },
+                    { key: "profitThreshold", label: "KÂR EŞİĞİ ($)", desc: "Bu kârı geçince risk artar", neg: false },
+                    { key: "profitRisk", label: "KÂR SONRASI RİSK ($)", desc: "Eşik geçildikten sonraki risk", neg: false },
+                    { key: "drawdownThreshold", label: "DRAWDOWN EŞİĞİ ($)", desc: "Bu zarar seviyesinde risk düşer (− işaretli, örn -1100)", neg: true },
+                    { key: "drawdownRisk", label: "DRAWDOWN SONRASI RİSK ($)", desc: "Eşik altında uygulanacak risk", neg: false },
+                  ].map(({ key, label, desc, neg }) => {
+                    const cur = String(editRules[key]);
+                    const isNeg = cur.startsWith("-");
+                    return (
+                      <div key={key}>
+                        <div style={{ fontSize: 11, color: "#555", marginBottom: 2, letterSpacing: 1 }}>{label}</div>
+                        <div style={{ fontSize: 10, color: "#333", marginBottom: 6 }}>{desc}</div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {neg && (
+                            <button
+                              onClick={() => {
+                                const abs = cur.replace("-", "");
+                                setEditRules({ ...editRules, [key]: isNeg ? abs : (abs ? "-" + abs : abs) });
+                              }}
+                              style={{ background: "#1a1a28", color: isNeg ? "#ff3b3b" : "#888", padding: "10px 14px", borderRadius: 4, fontSize: 16, border: "1px solid #2a2a3a", minWidth: 44 }}>
+                              +/−
+                            </button>
+                          )}
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={editRules[key]}
+                            onChange={e => {
+                              let v = e.target.value.replace(/[^0-9]/g, "");
+                              v = v.replace(/^0+(\d)/, "$1");
+                              if (neg && isNeg && v) v = "-" + v;
+                              setEditRules({ ...editRules, [key]: v });
+                            }}
+                            style={{ flex: 1 }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button onClick={saveRules} style={{ flex: 1, background: "#f0b429", color: "#07070d", padding: "12px", fontWeight: 500, fontSize: 13, letterSpacing: 1, borderRadius: 4 }}>KAYDET</button>
+                    <button onClick={() => setView("dashboard")} style={{ flex: 1, background: "#1a1a28", color: "#888", padding: "12px", fontSize: 13, letterSpacing: 1, borderRadius: 4 }}>İPTAL</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {view === "dashboard" && (
+              <div className="fadein">
+                {accounts.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "60px 20px", color: "#333" }}>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>◈</div>
+                    <div style={{ fontSize: 13, marginBottom: 20 }}>Henüz hesap yok</div>
+                    <button onClick={() => setView("addAccount")} style={{ background: "#1a1a28", color: "#f0b429", padding: "10px 24px", borderRadius: 4, fontSize: 13, border: "1px solid #2a2a3a" }}>İlk hesabı ekle →</button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+                      {accounts.map((a) => (
+                        <button key={a.id} onClick={() => setSelectedId(a.id)}
+                          style={{ padding: "8px 16px", borderRadius: 4, fontSize: 12, letterSpacing: 1,
+                            background: selectedId === a.id ? "#1a1a28" : "transparent",
+                            color: selectedId === a.id ? "#f0b429" : "#444",
+                            border: selectedId === a.id ? "1px solid #2e2e42" : "1px solid #1a1a1a",
+                          }}>
+                          {a.name.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+
+                    {acc && (
+                      <>
+                        <div className={pulse ? "pulse" : ""} style={{ background: "#0d0d18", border: "1px solid " + riskInfo.color + "22", borderRadius: 10, padding: "32px 28px", marginBottom: 20, position: "relative", overflow: "hidden" }}>
+                          <div style={{ position: "absolute", top: 0, right: 0, width: 200, height: 200, background: "radial-gradient(circle, " + riskInfo.color + "08 0%, transparent 70%)", borderRadius: "50%" }} />
+
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
+                            <div>
+                              <div style={{ fontSize: 10, color: "#444", letterSpacing: 2, marginBottom: 4 }}>AKTİF HESAP</div>
+                              <div style={{ fontSize: 18, fontFamily: "'Syne', sans-serif", fontWeight: 800, color: "#fff" }}>{acc.name}</div>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ fontSize: 10, color: "#444", letterSpacing: 2, marginBottom: 4 }}>BAKİYE</div>
+                              <div style={{ fontSize: 18, color: "#888" }}>${acc.balance.toLocaleString()}</div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: riskInfo.color + "15", border: "1px solid " + riskInfo.color + "40", borderRadius: 3, padding: "4px 10px", marginBottom: 20 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: "50%", background: riskInfo.color, boxShadow: "0 0 6px " + riskInfo.color }} />
+                            <span style={{ fontSize: 10, color: riskInfo.color, letterSpacing: 2, fontWeight: 500 }}>{riskInfo.label}</span>
+                          </div>
+
+                          <div style={{ marginBottom: 24 }}>
+                            <div style={{ fontSize: 10, color: "#444", letterSpacing: 2, marginBottom: 8 }}>RİSK ET</div>
+                            <div style={{ fontSize: 64, fontFamily: "'Syne', sans-serif", fontWeight: 800, color: riskInfo.color, lineHeight: 1, letterSpacing: -2 }}>
+                              ${risk}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#333", marginTop: 6 }}>
+                              {((risk / acc.balance) * 100).toFixed(2)}% — bakiyenin
+                            </div>
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                            {[
+                              { label: "NORMAL", val: "$" + acc.rules.baseRisk, active: acc.pnl > acc.rules.drawdownThreshold && acc.pnl < acc.rules.profitThreshold },
+                              { label: "KÂR +" + acc.rules.profitThreshold, val: "$" + acc.rules.profitRisk, active: acc.pnl >= acc.rules.profitThreshold },
+                              { label: "DD " + acc.rules.drawdownThreshold, val: "$" + acc.rules.drawdownRisk, active: acc.pnl <= acc.rules.drawdownThreshold },
+                            ].map(({ label, val, active }) => (
+                              <div key={label} style={{ padding: "10px 12px", background: active ? "#151520" : "#0a0a12", border: "1px solid " + (active ? "#2e2e44" : "#151515"), borderRadius: 6 }}>
+                                <div style={{ fontSize: 9, color: active ? "#888" : "#333", letterSpacing: 1, marginBottom: 4 }}>{label}</div>
+                                <div style={{ fontSize: 16, color: active ? "#fff" : "#333", fontFamily: "'Syne', sans-serif", fontWeight: 700 }}>{val}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div style={{ background: "#0d0d18", border: "1px solid #1e1e2e", borderRadius: 8, padding: 20, marginBottom: 16 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                            <div style={{ fontSize: 10, color: "#555", letterSpacing: 2 }}>GÜNCEL P&L</div>
+                            <div style={{ fontSize: 22, fontFamily: "'Syne', sans-serif", fontWeight: 800, color: pnlColor }}>
+                              {acc.pnl > 0 ? "+" : ""}{acc.pnl.toLocaleString()}$
+                            </div>
+                          </div>
+
+                          <div style={{ height: 2, background: "#1a1a28", borderRadius: 2, marginBottom: 14, overflow: "hidden" }}>
+                            <div style={{
+                              height: "100%",
+                              width: Math.min(Math.abs(acc.pnl) / Math.max(Math.abs(acc.rules.profitThreshold), Math.abs(acc.rules.drawdownThreshold)) * 100, 100) + "%",
+                              background: pnlColor, borderRadius: 2, transition: "width 0.3s ease",
+                            }} />
+                          </div>
+
+                          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                            <button
+                              onClick={() => setPnlInput(pnlInput.replace("-", ""))}
+                              style={{
+                                flex: 1, padding: "14px", borderRadius: 6, fontSize: 14, fontWeight: 600, letterSpacing: 1,
+                                background: !pnlInput.startsWith("-") ? "#00e5a015" : "#0a0a12",
+                                border: !pnlInput.startsWith("-") ? "1px solid #00e5a060" : "1px solid #1a1a1a",
+                                color: !pnlInput.startsWith("-") ? "#00e5a0" : "#444",
+                              }}>
+                              ▲ KÂR
+                            </button>
+                            <button
+                              onClick={() => { const abs = pnlInput.replace("-", ""); setPnlInput(abs ? "-" + abs : "-"); }}
+                              style={{
+                                flex: 1, padding: "14px", borderRadius: 6, fontSize: 14, fontWeight: 600, letterSpacing: 1,
+                                background: pnlInput.startsWith("-") ? "#ff3b3b15" : "#0a0a12",
+                                border: pnlInput.startsWith("-") ? "1px solid #ff3b3b60" : "1px solid #1a1a1a",
+                                color: pnlInput.startsWith("-") ? "#ff3b3b" : "#444",
+                              }}>
+                              ▼ ZARAR
+                            </button>
+                          </div>
+
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="Miktar yaz (örn: 350)"
+                            value={pnlInput.replace("-", "")}
+                            onChange={e => {
+                              let val = e.target.value.replace(/[^0-9]/g, "");
+                              val = val.replace(/^0+(\d)/, "$1");
+                              if (pnlInput.startsWith("-") && val) val = "-" + val;
+                              setPnlInput(val);
+                            }}
+                            onKeyDown={e => e.key === "Enter" && updatePnl(pnlInput)}
+                            style={{ marginBottom: 10, textAlign: "center", fontSize: 18 }}
+                          />
+
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button onClick={() => updatePnl(pnlInput)} style={{ flex: 1, background: "#f0b429", color: "#07070d", padding: "14px", borderRadius: 6, fontSize: 13, fontWeight: 600, letterSpacing: 1 }}>GÜNCELLE</button>
+                            <button onClick={resetPnl} style={{ background: "#1a1a28", color: "#666", padding: "14px 18px", borderRadius: 6, fontSize: 13 }}>↺ Sıfırla</button>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button onClick={() => { setEditRules({ ...acc.rules }); setView("editRules"); }}
+                            style={{ flex: 1, background: "#111", border: "1px solid #1e1e2e", color: "#666", padding: "10px", fontSize: 11, letterSpacing: 1, borderRadius: 4 }}>
+                            ⚙ KURALLARI DÜZENLE
+                          </button>
+                          <button onClick={() => { if (confirm('"' + acc.name + '" silinsin mi?')) deleteAccount(acc.id); }}
+                            style={{ background: "#111", border: "1px solid #1e1e2e", color: "#3a1a1a", padding: "10px 14px", fontSize: 11, borderRadius: 4 }}>
+                            ✕
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
